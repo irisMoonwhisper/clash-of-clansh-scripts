@@ -16,7 +16,8 @@ jobs:
       - name: Create .env
         run: |
           touch .env
-          echo "TOKEN=${{ secrets.TOKEN }}" >> .env
+          echo "EMAIL=${{ secrets.EMAIL }}" >> .env
+          echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
           echo "CLAN_TAG=${{ vars.CLAN_TAG }}" >> .env 
 
       - name: Run
