@@ -20,20 +20,13 @@ jobs:
           echo "PASSWORD=${{ secrets.PASSWORD }}" >> .env
           echo "CLAN_TAG=${{ vars.CLAN_TAG }}" >> .env 
 
-      - name: Download previous CSV
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: war-stats
-          path: .
-
       - name: Run
         run: python war_stats.py
 
-      - name: Upload CSV
-        uses: actions/upload-artifact@v4
-        with:
-          name: war-stats
-          path: |
-            war_attacks.csv
-            war_defenses.csv
+      - name: Commit CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add war_attacks.csv war_defenses.csv
+          git diff --staged --quiet || git commit -m "Update war stats"
+          git push
