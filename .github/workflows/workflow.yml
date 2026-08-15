@@ -14,4 +14,4 @@ jobs:
         run: pip install .
 
       - name: Run
-        run: uv run war_stats.py
+        run: python war_stats.py
