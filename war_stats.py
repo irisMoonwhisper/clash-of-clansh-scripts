@@ -92,6 +92,8 @@ def load_existing_keys(path: str, key_fields: Tuple[str, ...]) -> Set[tuple]:
 
 def append_rows(path: str, headers: List[str], rows: List[dict]) -> None:
     file_exists = os.path.exists(path)
+    print(f"{file_exists = }")
+
     with open(path, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=headers, delimiter=";")
         if not file_exists:
