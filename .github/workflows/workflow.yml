@@ -22,3 +22,11 @@ jobs:
 
       - name: Run
         run: python war_stats.py
+
+      - name: Upload CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: war-stats
+          path: |
+            war_attacks.csv
+            war_defenses.csv
