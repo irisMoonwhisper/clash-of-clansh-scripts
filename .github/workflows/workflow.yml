@@ -11,7 +11,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install .venv
-        run: uv sync
+        run: pip install .
 
       - name: Run
         run: uv run war_stats.py
