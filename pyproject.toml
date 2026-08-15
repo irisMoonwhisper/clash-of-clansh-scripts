@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "irisMoonwhisper", email = "iris.moonwhisper@proton.me" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
     "requests>=2.34.2",
