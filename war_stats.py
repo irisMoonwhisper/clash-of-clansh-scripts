@@ -1,17 +1,17 @@
+import asyncio
 import csv
 import os
 from dataclasses import dataclass
-from datetime import date, datetime
-import requests
+from datetime import date
 from typing import Dict, List, Set, Tuple
+
+import coc
 from dotenv import load_dotenv
 
 load_dotenv()
-API_TOKEN = os.getenv("TOKEN")
-CLAN_TAG = os.getenv("CLAN_TAG").replace("#", "")
-
-API_URL = "https://api.clashofclans.com/v1/"
-BASE_HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
+EMAIL = os.environ["EMAIL"]
+PASSWORD = os.environ["PASSWORD"]
+CLAN_TAG = os.getenv("CLAN_TAG")
 
 ATTACKS_FILE = "war_attacks.csv"
 DEFENSES_FILE = "war_defenses.csv"
@@ -71,21 +71,11 @@ class DefenseRow:
     attacker_th: int
 
 
-def get(url: str) -> dict:
-    response = requests.get(url, headers=BASE_HEADERS)
-    response.raise_for_status()
-    return response.json()
-
-
-def get_current_war() -> dict:
-    return get(f"{API_URL}clans/%23{CLAN_TAG}/currentwar")
-
-
-def split_war_sides(war: dict) -> Tuple[dict, dict]:
-    for side in ["clan", "opponent"]:
-        if war[side].get("tag", "").replace("#", "") == CLAN_TAG:
-            other_side = "opponent" if side == "clan" else "clan"
-            return war[side], war[other_side]
+def split_war_sides(war: coc.ClanWar) -> Tuple[coc.WarClan, coc.WarClan]:
+    if war.clan.tag.replace("#", "") == CLAN_TAG.replace("#", ""):
+        return war.clan, war.opponent
+    if war.opponent.tag.replace("#", "") == CLAN_TAG.replace("#", ""):
+        return war.opponent, war.clan
     return None, None
 
 
@@ -109,15 +99,15 @@ def append_rows(path: str, headers: List[str], rows: List[dict]) -> None:
         writer.writerows(rows)
 
 
-def collect_attack_rows(war: dict, our_clan: dict, opponent: dict, war_start: str, run_date: str) -> List[AttackRow]:
-    opponent_th: Dict[str, int] = {m["tag"]: m["townhallLevel"] for m in opponent.get("members", [])}
-    opponent_position: Dict[str, int] = {m["tag"]: m["mapPosition"] for m in opponent.get("members", [])}
-    our_position: Dict[str, int] = {m["tag"]: m["mapPosition"] for m in our_clan.get("members", [])}
+def collect_attack_rows(our_clan: coc.WarClan, opponent: coc.WarClan, war_start: str, run_date: str) -> List[AttackRow]:
+    opponent_th: Dict[str, int] = {m.tag: m.town_hall for m in opponent.members}
+    opponent_position: Dict[str, int] = {m.tag: m.map_position for m in opponent.members}
+    our_position: Dict[str, int] = {m.tag: m.map_position for m in our_clan.members}
 
-    all_attacks: List[Tuple[int, dict, dict]] = []
-    for member in our_clan.get("members", []):
-        for attack in member.get("attacks", []):
-            all_attacks.append((attack["order"], member, attack))
+    all_attacks: List[Tuple[int, coc.ClanWarMember, coc.WarAttack]] = []
+    for member in our_clan.members:
+        for attack in member.attacks:
+            all_attacks.append((attack.order, member, attack))
     all_attacks.sort(key=lambda x: x[0])
 
     best_stars_before: Dict[str, int] = {}
@@ -125,39 +115,39 @@ def collect_attack_rows(war: dict, our_clan: dict, opponent: dict, war_start: st
     rows: List[AttackRow] = []
 
     for order, member, attack in all_attacks:
-        defender_tag = attack["defenderTag"]
+        defender_tag = attack.defender_tag
         prior_best = best_stars_before.get(defender_tag, 0)
         defender_th = opponent_th.get(defender_tag, 0)
 
-        attack_counters[member["tag"]] = attack_counters.get(member["tag"], 0) + 1
+        attack_counters[member.tag] = attack_counters.get(member.tag, 0) + 1
 
         rows.append(AttackRow(
             war_start=war_start,
             run_date=run_date,
-            player_name=member["name"],
-            player_tag=member["tag"],
-            th_level=member["townhallLevel"],
-            attack_number=attack_counters[member["tag"]],
-            stars=attack["stars"],
-            destruction=attack.get("destructionPercentage", 0),
+            player_name=member.name,
+            player_tag=member.tag,
+            th_level=member.town_hall,
+            attack_number=attack_counters[member.tag],
+            stars=attack.stars,
+            destruction=attack.destruction,
             defender_th=defender_th,
-            position_diff=our_position.get(member["tag"], 0) - opponent_position.get(defender_tag, 0),
+            position_diff=our_position.get(member.tag, 0) - opponent_position.get(defender_tag, 0),
             already_3_starred=prior_best == 3,
         ))
 
-        best_stars_before[defender_tag] = max(prior_best, attack["stars"])
+        best_stars_before[defender_tag] = max(prior_best, attack.stars)
 
     return rows
 
 
-def collect_defense_rows(war: dict, our_clan: dict, opponent: dict, war_start: str, run_date: str) -> List[DefenseRow]:
-    our_members: Dict[str, dict] = {m["tag"]: m for m in our_clan.get("members", [])}
+def collect_defense_rows(our_clan: coc.WarClan, opponent: coc.WarClan, war_start: str, run_date: str) -> List[DefenseRow]:
+    our_members: Dict[str, coc.ClanWarMember] = {m.tag: m for m in our_clan.members}
     defense_counters: Dict[str, int] = {}
     rows: List[DefenseRow] = []
 
-    for member in opponent.get("members", []):
-        for attack in member.get("attacks", []):
-            defender_tag = attack["defenderTag"]
+    for member in opponent.members:
+        for attack in member.attacks:
+            defender_tag = attack.defender_tag
             defender = our_members.get(defender_tag)
             if not defender:
                 continue
@@ -165,68 +155,75 @@ def collect_defense_rows(war: dict, our_clan: dict, opponent: dict, war_start: s
             rows.append(DefenseRow(
                 war_start=war_start,
                 run_date=run_date,
-                player_name=defender["name"],
+                player_name=defender.name,
                 player_tag=defender_tag,
-                th_level=defender["townhallLevel"],
+                th_level=defender.town_hall,
                 defense_number=defense_counters[defender_tag],
-                stars=attack["stars"],
-                destruction=attack.get("destructionPercentage", 0),
-                attacker_th=member["townhallLevel"],
+                stars=attack.stars,
+                destruction=attack.destruction,
+                attacker_th=member.town_hall,
             ))
 
     return rows
-
-
-def format_war_start(raw: str) -> str:
-    dt = datetime.strptime(raw, "%Y%m%dT%H%M%S.%fZ")
-    return dt.strftime("%Y-%m-%d")
 
 
 def dataclass_to_row(obj) -> dict:
     return obj.__dict__
 
 
-def main() -> None:
-    war = get_current_war()
-    if war.get("state") not in ("inWar", "warEnded"):
-        print(f"War state is '{war.get('state')}', skipping")
-        return
+async def main() -> None:
+    async with coc.Client(key_names="gh-actions-key") as client:
+        try:
+            await client.login(EMAIL, PASSWORD)
+        except coc.InvalidCredentials as error:
+            raise SystemExit(str(error))
 
-    our_clan, opponent = split_war_sides(war)
-    if not our_clan:
-        print("Clan not found in current war data")
-        return
+        try:
+            war = await client.get_current_war(CLAN_TAG)
+        except coc.PrivateWarLog:
+            print("War log is private")
+            return
 
-    war_start = format_war_start(war.get("preparationStartTime", war.get("startTime", "")))
-    run_date = date.today().isoformat()
+        if war is None or war.state not in ("inWar", "warEnded"):
+            state = war.state if war else None
+            print(f"War state is '{state}', skipping")
+            return
 
-    attack_rows = collect_attack_rows(war, our_clan, opponent, war_start, run_date)
-    defense_rows = collect_defense_rows(war, our_clan, opponent, war_start, run_date)
+        our_clan, opponent = split_war_sides(war)
+        if not our_clan:
+            print("Clan not found in current war data")
+            return
 
-    existing_attack_keys = load_existing_keys(ATTACKS_FILE, ("war_start", "player_tag", "attack_number"))
-    existing_defense_keys = load_existing_keys(DEFENSES_FILE, ("war_start", "player_tag", "defense_number"))
+        war_start = war.preparation_start_time.time.strftime("%Y-%m-%d")
+        run_date = date.today().isoformat()
 
-    new_attack_rows = [
-        r for r in attack_rows
-        if (r.war_start, r.player_tag, str(r.attack_number)) not in existing_attack_keys
-    ]
-    new_defense_rows = [
-        r for r in defense_rows
-        if (r.war_start, r.player_tag, str(r.defense_number)) not in existing_defense_keys
-    ]
+        attack_rows = collect_attack_rows(our_clan, opponent, war_start, run_date)
+        defense_rows = collect_defense_rows(our_clan, opponent, war_start, run_date)
 
-    if new_attack_rows:
-        append_rows(ATTACKS_FILE, ATTACKS_HEADERS, [dataclass_to_row(r) for r in new_attack_rows])
-        print(f"Added {len(new_attack_rows)} attack rows")
-    else:
-        print("No new attacks")
+        existing_attack_keys = load_existing_keys(ATTACKS_FILE, ("war_start", "player_tag", "attack_number"))
+        existing_defense_keys = load_existing_keys(DEFENSES_FILE, ("war_start", "player_tag", "defense_number"))
 
-    if new_defense_rows:
-        append_rows(DEFENSES_FILE, DEFENSES_HEADERS, [dataclass_to_row(r) for r in new_defense_rows])
-        print(f"Added {len(new_defense_rows)} defense rows")
-    else:
-        print("No new defenses")
+        new_attack_rows = [
+            r for r in attack_rows
+            if (r.war_start, r.player_tag, str(r.attack_number)) not in existing_attack_keys
+        ]
+        new_defense_rows = [
+            r for r in defense_rows
+            if (r.war_start, r.player_tag, str(r.defense_number)) not in existing_defense_keys
+        ]
+
+        if new_attack_rows:
+            append_rows(ATTACKS_FILE, ATTACKS_HEADERS, [dataclass_to_row(r) for r in new_attack_rows])
+            print(f"Added {len(new_attack_rows)} attack rows")
+        else:
+            print("No new attacks")
+
+        if new_defense_rows:
+            append_rows(DEFENSES_FILE, DEFENSES_HEADERS, [dataclass_to_row(r) for r in new_defense_rows])
+            print(f"Added {len(new_defense_rows)} defense rows")
+        else:
+            print("No new defenses")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
