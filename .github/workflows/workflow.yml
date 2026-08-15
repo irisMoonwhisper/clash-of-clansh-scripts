@@ -13,5 +13,11 @@ jobs:
       - name: Install .venv
         run: pip install .
 
+      - name: Create .env
+        run: |
+          touch .env
+          echo "TOKEN=${{ secrets.TOKEN }}" >> .env
+          echo "CLAN_TAG=${{ vars.CLAN_TAG }}" >> .env 
+
       - name: Run
         run: python war_stats.py
